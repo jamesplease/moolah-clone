@@ -17,31 +17,42 @@ function findUser(db, googleId) {
 }
 
 module.exports = function(db) {
-  function passportCallback(accessToken, refreshToken, profile, done) {
-    const googleId = profile.id;
+  function googleStrategyCallback(req, accessToken, refreshToken, profile, done) {
+    // User is already logged in; probably through another account. We also
+    // associate their Google account with the login.
+    if (req.user) {
 
-    findUser(db, googleId)
-      .then(
-        result => {
-          done(null, result);
-        },
-        err => {
-          const queryErrorCode = pgp.errors.queryResultErrorCode;
-          const errorKey = _.findKey(queryErrorCode, c => c === err.code);
+    }
+    // User is not logged in. Let's log them in!
+    else {
+      const googleId = profile.id;
 
-          if (errorKey === 'noData') {
-            const query = baseSql.create('user_account', ['id', 'google_id']);
-            db.one(query, {google_id: googleId, id: createId()})
-              .then(result => {
-                return done(null, result);
-              }, () => {
-                return done(null, false);
-              });
-          } else {
-            return done(null, false);
+      // Let's see if we already have an account for this user
+      findUser(db, googleId)
+        // If we do, then we return it
+        .then(
+          result => {
+            done(null, result);
+          },
+          // Otherwise, we create a new account for them
+          err => {
+            const queryErrorCode = pgp.errors.queryResultErrorCode;
+            const errorKey = _.findKey(queryErrorCode, c => c === err.code);
+
+            if (errorKey === 'noData') {
+              const query = baseSql.create('user_account', ['id', 'google_id']);
+              db.one(query, {google_id: googleId, id: createId()})
+                .then(result => {
+                  return done(null, result);
+                }, () => {
+                  return done(null, false);
+                });
+            } else {
+              return done(null, false);
+            }
           }
-        }
-      );
+        );
+    }
   }
 
   // These should be configurable via env variables
@@ -50,8 +61,9 @@ module.exports = function(db) {
   const googleStrategy = new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: `${appUrlBase}/auth/google/callback`
-  }, passportCallback);
+    callbackURL: `${appUrlBase}/auth/google/callback`,
+    passReqToCallback: true
+  }, googleStrategyCallback);
 
   passport.use('google', googleStrategy);
 
